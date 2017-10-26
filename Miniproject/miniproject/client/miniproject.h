@@ -2,6 +2,21 @@
 #define MINIPROJECT_H_
 
 #include <arpa/inet.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <time.h>
+#include <sys/time.h>
+#include <signal.h>
+#include <string.h>
+#include <pthread.h>
+#include <stdbool.h>
 
 // typedef
 typedef void (*sighandler_t)(int);
@@ -37,5 +52,8 @@ void stop_simulation(struct udp_conn *udp);
 void request_y(struct udp_conn *udp);
 double recv_y(struct udp_conn *udp);
 void set_u(struct udp_conn *udp, double u);
+void *controller(void *argp);
+void *udp_listen(void *argp);
+void *signal_respond(void *argp);
 
 #endif /* MINIPROJECT_H_ */

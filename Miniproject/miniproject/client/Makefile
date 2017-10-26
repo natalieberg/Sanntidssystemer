@@ -1,9 +1,10 @@
+CC = /home/student/Desktop/git/Sanntidssystemer/Toolchain/buildroot-avr32-v3.0.0_TTK4147/output/staging/usr/bin/avr32-linux-gcc
 # program executable name
 TARGET = miniproject
 # compiler flags
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall -lpthread
 # linker flags
-LDFLAGS = -g
+LDFLAGS = -g -lpthread
 # list of sources
 SOURCES = $(shell find -name "*.c")
 # default rule, to compile everything
@@ -12,10 +13,10 @@ all: $(TARGET)
 OBJECTS = $(SOURCES:.c=.o)
 # link programs
 $(TARGET): $(OBJECTS)
-	/home/student/Desktop/git/Sanntidssystemer/Toolchain/buildroot-avr32-v3.0.0_TTK4147/output/staging/usr/bin/avr32-linux-gcc -o $@ $^ $(LDFLAGS)
+	 $(CC) -o $@ $^ $(LDFLAGS)
 # compile
 %.o : %.c
-	/home/student/Desktop/git/Sanntidssystemer/Toolchain/buildroot-avr32-v3.0.0_TTK4147/output/staging/usr/bin/avr32-linux-gcc -c -o $@ $< $(CFLAGS)
+	$(CC) -c -o $@ $< $(CFLAGS)
 # cleaning
 clean:
 	rm -f $(TARGET) $(OBJECTS)

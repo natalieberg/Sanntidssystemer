@@ -1,18 +1,12 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <time.h>
-#include <sys/time.h>
-#include <signal.h>
-#include <string.h>
-
 #include "miniproject.h"
+#include <sys/time.h>
+
+pthread_mutex_t conn_mutex;
+pthread_mutex_t y_mutex;
+double y = 0;
+struct udp_conn conn;
+bool is_simulating = true;
+bool signal_received = false;
 
 int udp_init_client(struct udp_conn *udp, int port, char *ip)
 {
@@ -91,43 +85,28 @@ void timespec_add_us(struct timespec *t, long us)
 
 void start_simulation(struct udp_conn *udp){
 	char startMsg[6] = "START";
+	pthread_mutex_lock(&conn_mutex);
 	udp_send(udp, startMsg, 6);
+	pthread_mutex_unlock(&conn_mutex);
 }
 
 void stop_simulation(struct udp_conn *udp){
 	char stopMsg[5] = "STOP";
+	pthread_mutex_lock(&conn_mutex);
 	udp_send(udp, stopMsg, 5);
+	pthread_mutex_unlock(&conn_mutex);
 }
 
 void request_y(struct udp_conn *udp){
 	char getMsg[4] = "GET";
+	pthread_mutex_lock(&conn_mutex);
 	udp_send(udp, getMsg, 4);
+	pthread_mutex_unlock(&conn_mutex);
 }
 
-double recv_y(struct udp_conn *udp){
-	printf("Start recv \n");
-	int len;
-	char msgRecv[100];
-	char check[8];
-	char *yChar;
-	double y;
-	len = udp_receive(udp, msgRecv, 100);
-	printf("Msg recv: %s\n", msgRecv);
-	strncpy(check, msgRecv, 7);
-	if ((strcmp(check, "GET_ACK") == 0)){
-		strtok_r(msgRecv, ":", &yChar);
-		//printf("%s\n", yChar);
-		y = atof(yChar);
-		//printf("%f\n", y);
-		printf("Stop recv \n");
-		return y;
-	} else {
-		return 0;
-	}
-}
 
 void set_u(struct udp_conn *udp, double u){
-	printf("Start set \n");
+	//printf("Start set \n");
 	char msgSetU[200] = "SET:";
 	char uChar[100];
 	//printf("%f\n", u);
@@ -135,16 +114,34 @@ void set_u(struct udp_conn *udp, double u){
 	//printf("%s\n", uChar);
 	//printf("%s\n", msgSetU);
 	strcat(msgSetU, uChar);
-	printf("%s\n", msgSetU);
+	//printf("%s\n", msgSetU);
+	pthread_mutex_lock(&conn_mutex);
 	udp_send(udp, msgSetU, 200);
-	printf("Stop set \n");
-
-
+	pthread_mutex_unlock(&conn_mutex);
+	//printf("Stop set \n");
 }
 
-int main() {
+bool compare_times(struct timespec *end, struct timespec *period){
+	return end->tv_sec > period->tv_sec || (end->tv_sec == period->tv_sec && end->tv_nsec > period->tv_nsec);
+	// printf("%lld.%.9ld \n", (long long)end->tv_sec, end->tv_nsec);
+	// printf("%lld.%.9ld \n", (long long)period->tv_sec, period->tv_nsec);
+	// if (end->tv_sec > period->tv_sec) {
+	// 	printf("true \n");
+	// 	return true;
+	// } else if (end->tv_sec < period->tv_sec) {
+	// 	printf("false \n");
+	// 	return false;
+	// } else {
+	// 		if(end->tv_nsec > period->tv_nsec ) {
+	// 			printf("true \n");
+	// 			return true;
+	// 		} else if (end->tv_nsec <= period->tv_nsec )
+	// 				printf("false \n");
+	// 				return false;
+	// }
+}
 
-	double y;
+void *controller(void *argp){
 	double u = 0;
 	double error;
 	double r = 1;
@@ -152,34 +149,100 @@ int main() {
 	double deltat = 0.001;
 	double Kp = 10;
 	double Ki = 800;
-	struct udp_conn conn1;
+
 	struct timespec period;
 	struct timespec end;
-	char IPAddr[12] = "192.168.0.1";
 
-	clock_gettime(CLOCK_REALTIME, &period);
 	clock_gettime(CLOCK_REALTIME, &end);
-
+	clock_gettime(CLOCK_REALTIME, &period);
 	timespec_add_us(&end, 0.5*1000000);
 
-	udp_init_client(&conn1, 9999, IPAddr);
-	start_simulation(&conn1);
+		while (compare_times(&end, &period)) {
+			//printf("start while \n");
+			request_y(&conn);
+			pthread_mutex_lock(&y_mutex);
+			printf("mutex lock in controller \n");
+			error = r-y;
+			pthread_mutex_unlock(&y_mutex);
+			printf("mutex unlock in controller \n");
+			integral = integral+(error*deltat);
+			u = Kp*error+Ki*integral;
+			set_u(&conn, u);
 
-	while (/*COMPARE STUPID TIMES*/) {
-		request_y(&conn1);
-		 y = recv_y(&conn1);
-		 printf(" y = %f\n", y);
-		 error = r-y;
-		 integral = integral+(error*deltat);
-		 u = Kp*error+Ki*integral;
-		 printf(" u = %f\n", u);
-		 set_u(&conn1, u);
-		 timespec_add_us(&period, 0.001*1000000);
-		 clock_nanosleep(&period);
+			timespec_add_us(&period, 0.001*1000000);
+			clock_nanosleep(&period);
+			//printf("end while \n");
+		}
+
+		printf("simulating = false \n");
+		is_simulating = false;
+}
+
+void *udp_listen(void *argp){
+	while (is_simulating) {
+		//printf("start udp while \n");
+		int len;
+		char msgRecv[100];
+		char check[8];
+		char *yChar;
+		//printf("before udp recv \n");
+		len = udp_receive(&conn, msgRecv, 100);
+		//printf("Msg recv: %s\n", msgRecv);
+		memset(check, '\0', sizeof(check));
+		strncpy(check, msgRecv, 6);
+		//printf("check: %s\n", check);
+		if ((strcmp(check, "GET_AC") == 0)){
+			strtok_r(msgRecv, ":", &yChar);
+			//printf("%s\n", yChar);
+			pthread_mutex_lock(&y_mutex);
+			printf("mutex lock in udp \n");
+			y = atof(yChar);
+			pthread_mutex_unlock(&y_mutex);
+			printf("mutex unlock in udp \n");
+			//printf("%f\n", y);
+			//printf("Stop recv \n");
+		} else if (((strcmp(check, "SIGNAL") == 0))) {
+			//signal_received = true;
+		}
+		//printf("end udp while \n");
+		usleep(0.1);
 	}
+}
 
-	stop_simulation(&conn1);
-	udp_close(&conn1);
+void *signal_respond(void *argp){
+	char ackMsg[11] = "SIGNAL_ACK";
+	while (is_simulating) {
+		if (signal_received) {
+			pthread_mutex_lock(&conn_mutex);
+			udp_send(&conn, ackMsg, 11);
+			pthread_mutex_unlock(&conn_mutex);
+			signal_received = false;
+		}
+	}
+}
+
+
+int main() {
+
+	char IPAddr[12] = "192.168.0.1";
+
+	pthread_t udp_listen_thread;
+	pthread_t controller_thread;
+	pthread_t ack_thread;
+
+	udp_init_client(&conn, 9999, IPAddr);
+	start_simulation(&conn);
+
+	pthread_create(&udp_listen_thread, NULL, udp_listen, NULL);
+	pthread_create(&controller_thread, NULL, controller, NULL);
+	//pthread_create(&ack_thread, NULL, signal_respond, NULL);
+
+	pthread_join(udp_listen_thread, NULL);
+	pthread_join(controller_thread, NULL);
+	pthread_join(ack_thread, NULL);
+
+	stop_simulation(&conn);
+	udp_close(&conn);
 
 	return 0;
 }
